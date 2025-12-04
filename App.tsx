@@ -1,16 +1,20 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { Layers, Download, Trash2, Plus } from 'lucide-react';
+import { Layers, Download, Trash2, Plus, Loader2, Image as ImageIcon, CheckCircle2, TrendingDown } from 'lucide-react';
 import SettingsPanel from './components/SettingsPanel';
 import Dropzone from './components/Dropzone';
 import ImageItem from './components/ImageItem';
 import { ProcessingOptions, ImageItem as ImageItemType } from './types';
 import { DEFAULT_OPTIONS } from './constants';
-import { generateId, processSingleImage } from './utils/imageUtils';
+import { generateId, processSingleImage, isHeic, convertHeicToJpeg } from './utils/imageUtils';
+// @ts-ignore
+import JSZip from 'jszip';
 
 const App: React.FC = () => {
   const [files, setFiles] = useState<ImageItemType[]>([]);
   const [options, setOptions] = useState<ProcessingOptions>(DEFAULT_OPTIONS);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isZipping, setIsZipping] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
 
   // Clean up object URLs to prevent memory leaks
   useEffect(() => {
@@ -24,32 +28,61 @@ const App: React.FC = () => {
   }, []); // Only on unmount for all, technically individual removal handles its own.
 
   const handleFilesDropped = useCallback(async (newFiles: File[]) => {
-    const newItems: ImageItemType[] = [];
-    
-    for (const file of newFiles) {
-      // Create preview immediately
-      const previewUrl = URL.createObjectURL(file);
-      const img = new Image();
-      img.src = previewUrl;
-      
-      // Wait for load to get dims
-      await new Promise((resolve) => {
-        img.onload = resolve;
-        img.onerror = resolve; // Continue anyway, it will fail later gracefully
-      });
+    setUploadProgress({ current: 0, total: newFiles.length });
+    let processedCount = 0;
 
-      newItems.push({
-        id: generateId(),
-        file,
-        previewUrl,
-        originalSize: file.size,
-        originalWidth: img.naturalWidth || 0,
-        originalHeight: img.naturalHeight || 0,
-        status: 'idle',
-      });
+    // Process one by one to avoid blocking and update UI incrementally
+    for (const file of newFiles) {
+      try {
+          let fileToProcess = file;
+          
+          // Convert HEIC if detected
+          if (isHeic(file)) {
+             try {
+                fileToProcess = await convertHeicToJpeg(file);
+             } catch (e) {
+                console.error(`Failed to convert HEIC file: ${file.name}`, e);
+                processedCount++;
+                setUploadProgress({ current: processedCount, total: newFiles.length });
+                continue; // Skip failed file
+             }
+          }
+
+          // Create preview immediately
+          const previewUrl = URL.createObjectURL(fileToProcess);
+          const img = new Image();
+          img.src = previewUrl;
+          
+          // Wait for load to get dims
+          await new Promise((resolve) => {
+            img.onload = resolve;
+            img.onerror = resolve; // Continue anyway
+          });
+
+          const newItem: ImageItemType = {
+            id: generateId(),
+            file: fileToProcess, // Use the converted file or original
+            previewUrl,
+            originalSize: file.size, // Keep original size info for reference, or fileToProcess.size? usually user wants to see their original file size
+            originalWidth: img.naturalWidth || 0,
+            originalHeight: img.naturalHeight || 0,
+            status: 'idle',
+          };
+          
+          setFiles((prev) => [...prev, newItem]);
+
+      } catch (err) {
+          console.error("Error processing dropped file", err);
+      } finally {
+        processedCount++;
+        setUploadProgress({ current: processedCount, total: newFiles.length });
+      }
     }
 
-    setFiles((prev) => [...prev, ...newItems]);
+    // Small delay before hiding to ensure user sees 100%
+    setTimeout(() => {
+        setUploadProgress(null);
+    }, 500);
   }, []);
 
   const handleRemoveFile = useCallback((id: string) => {
@@ -74,49 +107,104 @@ const App: React.FC = () => {
   const handleProcessAll = useCallback(async () => {
     setIsProcessing(true);
     
-    // Process sequentially to avoid browser UI freeze on large queues
-    // For even better perf, we could chunk this or use web workers, 
-    // but for < 50 images sequential async is usually fine.
-    
-    // We update state for each image so the user sees progress
-    const itemsToProcess = files.filter(f => f.status !== 'completed');
+    // Process all files to allow re-processing with new settings.
+    // We clone the list to iterate safely.
+    const itemsToProcess = [...files];
 
     for (const item of itemsToProcess) {
       // Update status to processing
-      setFiles(prev => prev.map(f => f.id === item.id ? { ...f, status: 'processing' } : f));
+      setFiles(prev => prev.map(f => f.id === item.id ? { ...f, status: 'processing', error: undefined } : f));
 
       // Actual processing
       const result = await processSingleImage(item, options);
       
       // Update result
-      setFiles(prev => prev.map(f => f.id === item.id ? { ...f, ...result } : f));
+      setFiles(prev => {
+          // Check if file still exists (in case cleared)
+          const fileExists = prev.some(f => f.id === item.id);
+          if (!fileExists) {
+              if (result.processedUrl) URL.revokeObjectURL(result.processedUrl);
+              return prev;
+          }
+
+          return prev.map(f => {
+            if (f.id === item.id) {
+                // Important: Revoke the old processed URL to avoid memory leaks
+                if (f.processedUrl && f.processedUrl !== result.processedUrl) {
+                    URL.revokeObjectURL(f.processedUrl);
+                }
+                return { ...f, ...result };
+            }
+            return f;
+          });
+      });
     }
 
     setIsProcessing(false);
   }, [files, options]);
 
-  // Download logic for "Download All" (Not true zip, just loop click)
-  const handleDownloadAll = useCallback(() => {
-    files.forEach((file) => {
-      if (file.status === 'completed' && file.processedUrl) {
+  // Download logic for "Download All" as Zip
+  const handleDownloadAll = useCallback(async () => {
+    setIsZipping(true);
+    try {
+        const zip = new JSZip();
+        
+        const processedFiles = files.filter(f => f.status === 'completed' && f.processedUrl);
+        
+        if (processedFiles.length === 0) {
+            setIsZipping(false);
+            return;
+        }
+
+        const usedNames: Record<string, number> = {};
+
+        // Sequentially add files to zip
+        for (const file of processedFiles) {
+             if (!file.processedUrl) continue;
+             
+             try {
+                const response = await fetch(file.processedUrl);
+                const blob = await response.blob();
+                
+                // Determine extension from blob type (most reliable)
+                let ext = 'jpg';
+                if (blob.type === 'image/png') ext = 'png';
+                else if (blob.type === 'image/webp') ext = 'webp';
+
+                let baseName = file.file.name.substring(0, file.file.name.lastIndexOf('.')) || file.file.name;
+                let fileName = `${baseName}_optimized.${ext}`;
+                
+                // Handle duplicate filenames
+                if (usedNames[fileName]) {
+                    usedNames[fileName]++;
+                    fileName = `${baseName}_optimized_${usedNames[fileName]}.${ext}`;
+                } else {
+                    usedNames[fileName] = 1;
+                }
+                
+                zip.file(fileName, blob);
+             } catch (e) {
+                 console.error(`Failed to add file ${file.file.name} to zip`, e);
+             }
+        }
+
+        const content = await zip.generateAsync({ type: "blob" });
+        const url = URL.createObjectURL(content);
         const link = document.createElement('a');
-        link.href = file.processedUrl;
-        
-        // Determine extension
-        let ext = 'jpg';
-        if (options.format === 'image/png') ext = 'png';
-        if (options.format === 'image/webp') ext = 'webp';
-        
-        // Remove old extension from name if possible
-        const baseName = file.file.name.substring(0, file.file.name.lastIndexOf('.')) || file.file.name;
-        link.download = `${baseName}_optimized.${ext}`;
-        
+        link.href = url;
+        link.download = "OptiBatch.zip";
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-      }
-    });
-  }, [files, options.format]);
+        URL.revokeObjectURL(url);
+
+    } catch (error) {
+        console.error("Zip failed", error);
+        alert("Failed to create zip file.");
+    } finally {
+        setIsZipping(false);
+    }
+  }, [files]);
 
   const stats = {
     total: files.length,
@@ -130,7 +218,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden">
+    <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden relative">
       
       {/* Sidebar Options */}
       <SettingsPanel
@@ -159,11 +247,29 @@ const App: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-4">
-             {stats.completed > 0 && (
-                <div className="hidden md:flex items-center gap-4 text-xs font-medium text-slate-400 mr-4">
-                    <span>Processed: <span className="text-white">{stats.completed}/{stats.total}</span></span>
+             {/* Stats Indicators */}
+             {files.length > 0 && (
+                <div className="hidden md:flex items-center gap-3 text-xs font-medium text-slate-400 mr-2 animate-in fade-in slide-in-from-top-4 duration-300">
+                    {/* Total Count - Always visible if files exist */}
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/50 border border-slate-700/50 rounded-lg shadow-sm backdrop-blur-sm">
+                        <ImageIcon className="w-3.5 h-3.5 text-blue-400" />
+                        <span>Images: <span className="text-white font-bold ml-0.5">{stats.total}</span></span>
+                    </div>
+
+                    {/* Progress Stats */}
+                    {stats.completed > 0 && (
+                        <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/50 border border-slate-700/50 rounded-lg shadow-sm backdrop-blur-sm">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-green-400" />
+                            <span>Done: <span className="text-white font-bold ml-0.5">{stats.completed}</span></span>
+                        </div>
+                    )}
+
+                    {/* Savings Stats */}
                     {stats.savedBytes > 0 && (
-                        <span>Saved: <span className="text-green-400">{(stats.savedBytes / 1024 / 1024).toFixed(2)} MB</span></span>
+                         <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/50 border border-slate-700/50 rounded-lg shadow-sm backdrop-blur-sm">
+                            <TrendingDown className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>Saved: <span className="text-emerald-400 font-bold ml-0.5">{(stats.savedBytes / 1024 / 1024).toFixed(1)} MB</span></span>
+                        </div>
                     )}
                 </div>
              )}
@@ -171,17 +277,18 @@ const App: React.FC = () => {
             {stats.completed > 0 && (
                 <button
                 onClick={handleDownloadAll}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-blue-400 border border-slate-700 hover:border-slate-600 transition-all text-sm font-medium"
+                disabled={isZipping || isProcessing}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-blue-400 border border-slate-700 hover:border-slate-600 transition-all text-sm font-medium disabled:opacity-70 disabled:cursor-not-allowed"
                 >
-                <Download className="w-4 h-4" />
-                Download All
+                {isZipping ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                {isZipping ? 'Zipping...' : 'Download All'}
                 </button>
             )}
 
             {files.length > 0 && (
                 <button
                 onClick={handleClearAll}
-                disabled={isProcessing}
+                disabled={isProcessing || isZipping}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-all text-sm font-medium disabled:opacity-50"
                 >
                 <Trash2 className="w-4 h-4" />
@@ -203,7 +310,7 @@ const App: React.FC = () => {
                         <span className="text-blue-400 font-bold text-lg">1</span>
                     </div>
                     <h3 className="font-medium text-slate-200 mb-1">Upload</h3>
-                    <p className="text-xs text-slate-500">Drag & drop multiple images (JPG, PNG, WebP).</p>
+                    <p className="text-xs text-slate-500">Drag & drop multiple images (JPG, PNG, WebP, HEIC).</p>
                  </div>
                  <div className="p-4 rounded-xl bg-slate-900 border border-slate-800">
                     <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center mb-3">
@@ -238,6 +345,7 @@ const App: React.FC = () => {
                     key={file.id}
                     item={file}
                     onRemove={handleRemoveFile}
+                    isProcessing={isProcessing}
                     />
                 ))}
                </div>
@@ -245,6 +353,25 @@ const App: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Upload Progress Toast */}
+      {uploadProgress && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 border border-slate-700 p-4 rounded-xl shadow-2xl flex items-center gap-4 min-w-[320px] backdrop-blur-md animate-in slide-in-from-bottom-4 duration-300">
+            <Loader2 className="w-5 h-5 text-blue-500 animate-spin shrink-0" />
+            <div className="flex-1 min-w-0">
+                <div className="flex justify-between text-xs font-medium mb-1.5">
+                    <span className="text-slate-200">Preparing images...</span>
+                    <span className="text-slate-400 font-mono">{uploadProgress.current} / {uploadProgress.total}</span>
+                </div>
+                <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                    <div 
+                        className="h-full bg-blue-500 transition-all duration-300 ease-out rounded-full"
+                        style={{ width: `${(uploadProgress.current / uploadProgress.total) * 100}%` }}
+                    />
+                </div>
+            </div>
+        </div>
+      )}
     </div>
   );
 };
