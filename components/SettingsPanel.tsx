@@ -26,7 +26,23 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     key: K,
     value: ProcessingOptions[K]
   ) => {
-    onOptionsChange({ ...options, [key]: value });
+    if (key === 'resizeMode') {
+      const newMode = value as ResizeMode;
+      const updates: Partial<ProcessingOptions> = { resizeMode: newMode };
+      
+      // Set sensible defaults when switching modes
+      if (newMode === 'fixed-width') {
+        updates.resizeValue = 1200;
+      } else if (newMode === 'fixed-height') {
+        updates.resizeValue = 800;
+      } else if (newMode === 'percentage') {
+        updates.resizeValue = 100;
+      }
+      
+      onOptionsChange({ ...options, ...updates });
+    } else {
+      onOptionsChange({ ...options, [key]: value });
+    }
   };
 
   return (
