@@ -7,10 +7,9 @@ import CompareModal from './CompareModal';
 interface ImageItemProps {
   item: ImageItemType;
   onRemove: (id: string) => void;
-  isProcessing?: boolean;
 }
 
-const ImageItem: React.FC<ImageItemProps> = ({ item, onRemove, isProcessing = false }) => {
+const ImageItem: React.FC<ImageItemProps> = ({ item, onRemove }) => {
   const [showPreview, setShowPreview] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
   const [cursorPos, setCursorPos] = useState({ x: 0, y: 0 });
@@ -62,6 +61,17 @@ const ImageItem: React.FC<ImageItemProps> = ({ item, onRemove, isProcessing = fa
 
   // Determine if preview should show on left or right to avoid clipping
   const isRightHalf = typeof window !== 'undefined' && cursorPos.x > window.innerWidth / 2;
+
+  const getExtension = (format: string) => {
+    if (format === 'image/png') return 'png';
+    if (format === 'image/webp') return 'webp';
+    return 'jpg';
+  };
+
+  const baseName = item.file.name.substring(0, item.file.name.lastIndexOf('.')) || item.file.name;
+  const downloadName = item.processedFormat 
+    ? `${baseName}_optimized.${getExtension(item.processedFormat)}`
+    : item.file.name;
 
   return (
     <>
@@ -197,7 +207,7 @@ const ImageItem: React.FC<ImageItemProps> = ({ item, onRemove, isProcessing = fa
 
       {/* Actions */}
       <div className="flex items-center gap-2">
-        {item.status === 'completed' && item.processedUrl && !isProcessing && (
+        {item.status === 'completed' && item.processedUrl && (
             <>
             <button
                 onClick={() => setShowCompare(true)}
@@ -208,7 +218,7 @@ const ImageItem: React.FC<ImageItemProps> = ({ item, onRemove, isProcessing = fa
             </button>
             <a
                 href={item.processedUrl}
-                download={`processed-${item.file.name}`}
+                download={downloadName}
                 className="p-2 rounded-lg text-slate-400 hover:text-green-400 hover:bg-green-500/10 transition-colors"
                 title="Download"
             >
@@ -219,12 +229,7 @@ const ImageItem: React.FC<ImageItemProps> = ({ item, onRemove, isProcessing = fa
         
         <button
           onClick={() => onRemove(item.id)}
-          disabled={isProcessing}
-          className={`p-2 rounded-lg transition-colors focus:opacity-100 ${
-              isProcessing 
-              ? 'text-slate-700 cursor-not-allowed' 
-              : 'text-slate-500 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100'
-          }`}
+          className="p-2 rounded-lg transition-colors focus:opacity-100 text-slate-500 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100"
           title="Remove"
         >
           <X className="w-5 h-5" />

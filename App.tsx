@@ -1,11 +1,11 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { Layers, Download, Trash2, Plus, Loader2, Image as ImageIcon, CheckCircle2, TrendingDown } from 'lucide-react';
+import { Layers, Download, Trash2, Loader2, Image as ImageIcon, CheckCircle2, TrendingDown } from 'lucide-react';
 import SettingsPanel from './components/SettingsPanel';
 import Dropzone from './components/Dropzone';
 import ImageItem from './components/ImageItem';
 import { ProcessingOptions, ImageItem as ImageItemType } from './types';
 import { DEFAULT_OPTIONS } from './constants';
-import { generateId, processSingleImage, isHeic, convertHeicToJpeg } from './utils/imageUtils';
+import { generateId, processFile, isHeic, convertHeicToJpeg } from './utils/imageUtils';
 // @ts-ignore
 import JSZip from 'jszip';
 
@@ -25,7 +25,7 @@ const App: React.FC = () => {
       });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Only on unmount for all, technically individual removal handles its own.
+  }, []); 
 
   const handleFilesDropped = useCallback(async (newFiles: File[]) => {
     setUploadProgress({ current: 0, total: newFiles.length });
@@ -35,37 +35,46 @@ const App: React.FC = () => {
     for (const file of newFiles) {
       try {
           let fileToProcess = file;
-          
-          // Convert HEIC if detected
+          let previewUrl = '';
+          let width = 0;
+          let height = 0;
+
+          // Image Handling
           if (isHeic(file)) {
-             try {
+            try {
                 fileToProcess = await convertHeicToJpeg(file);
-             } catch (e) {
+                previewUrl = URL.createObjectURL(fileToProcess);
+            } catch (e) {
                 console.error(`Failed to convert HEIC file: ${file.name}`, e);
-                processedCount++;
-                setUploadProgress({ current: processedCount, total: newFiles.length });
-                continue; // Skip failed file
-             }
+                continue; 
+            }
+          } else {
+            previewUrl = URL.createObjectURL(fileToProcess);
           }
 
-          // Create preview immediately
-          const previewUrl = URL.createObjectURL(fileToProcess);
-          const img = new Image();
-          img.src = previewUrl;
-          
-          // Wait for load to get dims
-          await new Promise((resolve) => {
-            img.onload = resolve;
-            img.onerror = resolve; // Continue anyway
-          });
+          // Get dimensions
+          try {
+            const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+                const i = new Image();
+                i.onload = () => resolve(i);
+                i.onerror = reject;
+                i.src = previewUrl;
+            });
+            width = img.naturalWidth;
+            height = img.naturalHeight;
+          } catch (e) {
+              // If image fails to load, we might still process it blindly, 
+              // but previewUrl is likely bad.
+              console.warn("Failed to load image for dimensions", e);
+          }
 
           const newItem: ImageItemType = {
             id: generateId(),
-            file: fileToProcess, // Use the converted file or original
+            file: fileToProcess,
             previewUrl,
-            originalSize: file.size, // Keep original size info for reference, or fileToProcess.size? usually user wants to see their original file size
-            originalWidth: img.naturalWidth || 0,
-            originalHeight: img.naturalHeight || 0,
+            originalSize: file.size,
+            originalWidth: width,
+            originalHeight: height,
             status: 'idle',
           };
           
@@ -79,7 +88,6 @@ const App: React.FC = () => {
       }
     }
 
-    // Small delay before hiding to ensure user sees 100%
     setTimeout(() => {
         setUploadProgress(null);
     }, 500);
@@ -107,20 +115,27 @@ const App: React.FC = () => {
   const handleProcessAll = useCallback(async () => {
     setIsProcessing(true);
     
-    // Process all files to allow re-processing with new settings.
-    // We clone the list to iterate safely.
-    const itemsToProcess = [...files];
+    // Default: process only idle or error files
+    let itemsToProcess = files.filter(f => f.status === 'idle' || f.status === 'error');
+
+    // If there are no idle/error files but we have files, it means the user wants to Re-process everything
+    // (e.g. they changed settings after a batch was completed)
+    if (itemsToProcess.length === 0 && files.length > 0) {
+        itemsToProcess = files;
+    }
 
     for (const item of itemsToProcess) {
-      // Update status to processing
       setFiles(prev => prev.map(f => f.id === item.id ? { ...f, status: 'processing', error: undefined } : f));
 
-      // Actual processing
-      const result = await processSingleImage(item, options);
+      let result: Partial<ImageItemType>;
+
+      try {
+         result = await processFile(item, options);
+      } catch (err: any) {
+         result = { status: 'error', error: err.message || 'Processing failed' };
+      }
       
-      // Update result
       setFiles(prev => {
-          // Check if file still exists (in case cleared)
           const fileExists = prev.some(f => f.id === item.id);
           if (!fileExists) {
               if (result.processedUrl) URL.revokeObjectURL(result.processedUrl);
@@ -129,7 +144,6 @@ const App: React.FC = () => {
 
           return prev.map(f => {
             if (f.id === item.id) {
-                // Important: Revoke the old processed URL to avoid memory leaks
                 if (f.processedUrl && f.processedUrl !== result.processedUrl) {
                     URL.revokeObjectURL(f.processedUrl);
                 }
@@ -143,7 +157,6 @@ const App: React.FC = () => {
     setIsProcessing(false);
   }, [files, options]);
 
-  // Download logic for "Download All" as Zip
   const handleDownloadAll = useCallback(async () => {
     setIsZipping(true);
     try {
@@ -158,7 +171,6 @@ const App: React.FC = () => {
 
         const usedNames: Record<string, number> = {};
 
-        // Sequentially add files to zip
         for (const file of processedFiles) {
              if (!file.processedUrl) continue;
              
@@ -166,15 +178,17 @@ const App: React.FC = () => {
                 const response = await fetch(file.processedUrl);
                 const blob = await response.blob();
                 
-                // Determine extension from blob type (most reliable)
-                let ext = 'jpg';
-                if (blob.type === 'image/png') ext = 'png';
-                else if (blob.type === 'image/webp') ext = 'webp';
+                let ext = 'jpg'; // default
+                if (blob.type === 'image/png') {
+                    ext = 'png';
+                } else if (blob.type === 'image/webp') {
+                    ext = 'webp';
+                }
 
                 let baseName = file.file.name.substring(0, file.file.name.lastIndexOf('.')) || file.file.name;
+                // Add suffix
                 let fileName = `${baseName}_optimized.${ext}`;
                 
-                // Handle duplicate filenames
                 if (usedNames[fileName]) {
                     usedNames[fileName]++;
                     fileName = `${baseName}_optimized_${usedNames[fileName]}.${ext}`;
@@ -217,6 +231,9 @@ const App: React.FC = () => {
     }, 0)
   };
 
+  const hasIdleOrError = files.some(f => f.status === 'idle' || f.status === 'error');
+  const showReprocess = files.length > 0 && !hasIdleOrError;
+
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden relative">
       
@@ -228,21 +245,24 @@ const App: React.FC = () => {
         onProcess={handleProcessAll}
         isProcessing={isProcessing}
         hasFiles={files.length > 0}
+        showReprocess={showReprocess}
       />
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 h-full">
         {/* Header */}
-        <header className="flex items-center justify-between px-8 py-6 border-b border-slate-800 bg-slate-950/50 backdrop-blur-sm z-10">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-blue-600 rounded-lg shadow-lg shadow-blue-500/20">
-              <Layers className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
-                OptiBatch
-              </h1>
-              <p className="text-xs text-slate-500 font-medium">Bulk Image Processor</p>
+        <header className="flex items-center justify-between px-8 py-4 border-b border-slate-800 bg-slate-950/50 backdrop-blur-sm z-10">
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-600 rounded-lg shadow-lg shadow-blue-500/20">
+                <Layers className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
+                    OptiBatch
+                </h1>
+                <p className="text-xs text-slate-500 font-medium">Bulk Processor</p>
+                </div>
             </div>
           </div>
 
@@ -250,13 +270,11 @@ const App: React.FC = () => {
              {/* Stats Indicators */}
              {files.length > 0 && (
                 <div className="hidden md:flex items-center gap-3 text-xs font-medium text-slate-400 mr-2 animate-in fade-in slide-in-from-top-4 duration-300">
-                    {/* Total Count - Always visible if files exist */}
                     <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/50 border border-slate-700/50 rounded-lg shadow-sm backdrop-blur-sm">
                         <ImageIcon className="w-3.5 h-3.5 text-blue-400" />
-                        <span>Images: <span className="text-white font-bold ml-0.5">{stats.total}</span></span>
+                        <span>Files: <span className="text-white font-bold ml-0.5">{stats.total}</span></span>
                     </div>
 
-                    {/* Progress Stats */}
                     {stats.completed > 0 && (
                         <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/50 border border-slate-700/50 rounded-lg shadow-sm backdrop-blur-sm">
                             <CheckCircle2 className="w-3.5 h-3.5 text-green-400" />
@@ -264,7 +282,6 @@ const App: React.FC = () => {
                         </div>
                     )}
 
-                    {/* Savings Stats */}
                     {stats.savedBytes > 0 && (
                          <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/50 border border-slate-700/50 rounded-lg shadow-sm backdrop-blur-sm">
                             <TrendingDown className="w-3.5 h-3.5 text-emerald-400" />
@@ -310,27 +327,28 @@ const App: React.FC = () => {
                         <span className="text-blue-400 font-bold text-lg">1</span>
                     </div>
                     <h3 className="font-medium text-slate-200 mb-1">Upload</h3>
-                    <p className="text-xs text-slate-500">Drag & drop multiple images (JPG, PNG, WebP, HEIC).</p>
+                    <p className="text-xs text-slate-500">Drag & drop multiple images.</p>
                  </div>
                  <div className="p-4 rounded-xl bg-slate-900 border border-slate-800">
                     <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center mb-3">
                         <span className="text-purple-400 font-bold text-lg">2</span>
                     </div>
                     <h3 className="font-medium text-slate-200 mb-1">Configure</h3>
-                    <p className="text-xs text-slate-500">Set size, format, and quality options in the sidebar.</p>
+                    <p className="text-xs text-slate-500">
+                        Set size, format and quality.
+                    </p>
                  </div>
                  <div className="p-4 rounded-xl bg-slate-900 border border-slate-800">
                     <div className="w-8 h-8 rounded-lg bg-green-500/10 flex items-center justify-center mb-3">
                         <span className="text-green-400 font-bold text-lg">3</span>
                     </div>
                     <h3 className="font-medium text-slate-200 mb-1">Process</h3>
-                    <p className="text-xs text-slate-500">Click process and download your optimized images.</p>
+                    <p className="text-xs text-slate-500">Click process and download your optimized files.</p>
                  </div>
               </div>
             </div>
           ) : (
             <div className="max-w-4xl mx-auto space-y-4 pb-20">
-               {/* Add more bar */}
                <div className="flex justify-end mb-4">
                   <Dropzone 
                     onFilesDropped={handleFilesDropped} 
@@ -345,7 +363,6 @@ const App: React.FC = () => {
                     key={file.id}
                     item={file}
                     onRemove={handleRemoveFile}
-                    isProcessing={isProcessing}
                     />
                 ))}
                </div>
@@ -354,13 +371,12 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      {/* Upload Progress Toast */}
       {uploadProgress && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 border border-slate-700 p-4 rounded-xl shadow-2xl flex items-center gap-4 min-w-[320px] backdrop-blur-md animate-in slide-in-from-bottom-4 duration-300">
             <Loader2 className="w-5 h-5 text-blue-500 animate-spin shrink-0" />
             <div className="flex-1 min-w-0">
                 <div className="flex justify-between text-xs font-medium mb-1.5">
-                    <span className="text-slate-200">Preparing images...</span>
+                    <span className="text-slate-200">Processing inputs...</span>
                     <span className="text-slate-400 font-mono">{uploadProgress.current} / {uploadProgress.total}</span>
                 </div>
                 <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">

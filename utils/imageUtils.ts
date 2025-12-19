@@ -52,11 +52,12 @@ export const convertHeicToJpeg = async (file: File): Promise<File> => {
   }
 };
 
-export const processSingleImage = async (
+export const processFile = async (
   item: ImageItem,
   options: ProcessingOptions
 ): Promise<Partial<ImageItem>> => {
   try {
+    // Standard Image Processing
     const img = await loadImage(item.previewUrl);
     
     let targetWidth = img.naturalWidth;
@@ -114,12 +115,14 @@ export const processSingleImage = async (
     return {
       status: 'completed',
       processedUrl,
+      processedFormat: options.format,
       processedSize: blob.size,
       processedWidth: targetWidth,
       processedHeight: targetHeight,
       error: undefined,
     };
   } catch (err: any) {
+    console.error("Processing error:", err);
     return {
       status: 'error',
       error: err.message || 'Processing failed',

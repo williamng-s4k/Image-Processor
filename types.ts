@@ -21,6 +21,7 @@ export interface ImageItem {
   originalHeight: number;
   status: ProcessStatus;
   processedUrl?: string;
+  processedFormat?: ImageFormat;
   processedSize?: number;
   processedWidth?: number;
   processedHeight?: number;

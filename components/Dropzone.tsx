@@ -22,10 +22,14 @@ const Dropzone: React.FC<DropzoneProps> = ({ onFilesDropped, className = '', isC
     setIsDragging(false);
   }, []);
 
-  const isValidImage = (file: File) => {
+  const isValidFile = (file: File) => {
     const type = file.type.toLowerCase();
     const name = file.name.toLowerCase();
-    return type.startsWith('image/') || name.endsWith('.heic') || name.endsWith('.heif');
+    
+    // Image mode
+    return type.startsWith('image/') || 
+           name.endsWith('.heic') || 
+           name.endsWith('.heif');
   };
 
   const handleDrop = useCallback(
@@ -34,7 +38,7 @@ const Dropzone: React.FC<DropzoneProps> = ({ onFilesDropped, className = '', isC
       e.stopPropagation();
       setIsDragging(false);
 
-      const files = Array.from(e.dataTransfer.files).filter(isValidImage);
+      const files = Array.from(e.dataTransfer.files).filter(isValidFile);
       if (files.length > 0) {
         onFilesDropped(files);
       }
@@ -45,7 +49,7 @@ const Dropzone: React.FC<DropzoneProps> = ({ onFilesDropped, className = '', isC
   const handleFileInput = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       if (e.target.files && e.target.files.length > 0) {
-        const files = Array.from(e.target.files).filter(isValidImage);
+        const files = Array.from(e.target.files).filter(isValidFile);
         onFilesDropped(files);
       }
       // Reset value so same files can be selected again
@@ -53,6 +57,8 @@ const Dropzone: React.FC<DropzoneProps> = ({ onFilesDropped, className = '', isC
     },
     [onFilesDropped]
   );
+
+  const acceptString = 'image/*,.heic,.heif';
 
   if (isCompact) {
      return (
@@ -69,13 +75,13 @@ const Dropzone: React.FC<DropzoneProps> = ({ onFilesDropped, className = '', isC
             <input
                 type="file"
                 multiple
-                accept="image/*,.heic,.heif"
+                accept={acceptString}
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                 onChange={handleFileInput}
             />
             <div className="flex flex-col items-center text-center space-y-2">
                 <Upload className="w-6 h-6 text-slate-400" />
-                <span className="text-xs text-slate-400 font-medium">Add more</span>
+                <span className="text-xs text-slate-400 font-medium">Add Images</span>
             </div>
         </div>
      )
@@ -95,20 +101,24 @@ const Dropzone: React.FC<DropzoneProps> = ({ onFilesDropped, className = '', isC
       <input
         type="file"
         multiple
-        accept="image/*,.heic,.heif"
+        accept={acceptString}
         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
         onChange={handleFileInput}
       />
       <div className="flex flex-col items-center text-center space-y-4 p-8 pointer-events-none">
         <div className={`p-4 rounded-full bg-slate-800/50 ${isDragging ? 'text-blue-400' : 'text-slate-400'}`}>
-            {isDragging ? <Upload className="w-12 h-12" /> : <FileImage className="w-12 h-12" />}
+            {isDragging ? <Upload className="w-12 h-12" /> : (
+              <div className="relative">
+                 <FileImage className="w-12 h-12" />
+              </div>
+            )}
         </div>
         <div className="space-y-1">
           <p className="text-xl font-semibold text-slate-200">
-            {isDragging ? 'Drop images here' : 'Drag & drop images'}
+            {isDragging ? 'Drop files here' : 'Drag & drop files'}
           </p>
           <p className="text-sm text-slate-400">
-            or click to browse from your computer
+            Images (JPG, PNG, WebP, HEIC)
           </p>
         </div>
         <div className="pt-4 flex flex-wrap justify-center gap-2">
