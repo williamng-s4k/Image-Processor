@@ -1,4 +1,5 @@
-export type ImageFormat = 'image/jpeg' | 'image/png' | 'image/webp';
+
+export type ImageFormat = 'image/jpeg' | 'image/png' | 'image/webp' | 'original';
 
 export type ResizeMode = 'original' | 'percentage' | 'fixed-width' | 'fixed-height';
 
@@ -25,5 +26,21 @@ export interface ImageItem {
   processedSize?: number;
   processedWidth?: number;
   processedHeight?: number;
+  error?: string;
+}
+
+// Fix: Added PdfProcessingOptions which was missing and causing errors in utils/pdfUtils.ts
+export interface PdfProcessingOptions {
+  // Add placeholder for PDF specific options
+}
+
+// Fix: Added PdfItem which was missing and causing errors in utils/pdfUtils.ts and components/PdfItem.tsx
+export interface PdfItem {
+  id: string;
+  file: File;
+  originalSize: number;
+  status: ProcessStatus;
+  processedUrl?: string;
+  processedSize?: number;
   error?: string;
 }

@@ -30,7 +30,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       const newMode = value as ResizeMode;
       const updates: Partial<ProcessingOptions> = { resizeMode: newMode };
       
-      // Set sensible defaults when switching modes
       if (newMode === 'fixed-width') {
         updates.resizeValue = 1200;
       } else if (newMode === 'fixed-height') {
@@ -53,19 +52,16 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           Image Settings
         </h2>
         <p className="text-xs text-slate-400 mt-1">
-          Adjust settings for all files
+          Adjust parameters for batch processing
         </p>
       </div>
 
       <div className="p-6 space-y-8 flex-1">
-        
-        {/* === IMAGE MODE SETTINGS === */}
         <section className="space-y-4">
           <div className="flex items-center gap-2 text-sm font-medium text-slate-300">
             <ImageIcon className="w-4 h-4 text-blue-400" />
             RESIZE
           </div>
-          
           <div className="grid grid-cols-2 gap-2">
             {(['original', 'percentage', 'fixed-width', 'fixed-height'] as ResizeMode[]).map((m) => (
               <button
@@ -82,7 +78,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </button>
             ))}
           </div>
-
           {options.resizeMode !== 'original' && (
             <div className="space-y-3 p-4 bg-slate-800/50 rounded-lg border border-slate-700/50">
               <label className="text-xs text-slate-400">
@@ -117,40 +112,33 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           )}
         </section>
 
-        {/* Format Section */}
         <section className="space-y-4">
-        <div className="flex items-center gap-2 text-sm font-medium text-slate-300">
-            <Type className="w-4 h-4 text-purple-400" />
-            OUTPUT FORMAT
-        </div>
-        <div className="grid grid-cols-1 gap-2">
-            <select
+          <div className="flex items-center gap-2 text-sm font-medium text-slate-300">
+              <Type className="w-4 h-4 text-purple-400" />
+              OUTPUT FORMAT
+          </div>
+          <select
             value={options.format}
             onChange={(e) => handleChange('format', e.target.value as ImageFormat)}
             disabled={disabled}
-            className={`w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-blue-500`}
-            >
+            className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-blue-500"
+          >
             {Object.entries(SUPPORTED_FORMATS).map(([value, label]) => (
-                <option key={value} value={value}>
-                {label}
-                </option>
+                <option key={value} value={value}>{label}</option>
             ))}
-            </select>
-        </div>
+          </select>
         </section>
 
-        {/* Quality Section - Shared */}
         <section className="space-y-4">
           <div className="flex items-center gap-2 text-sm font-medium text-slate-300">
             <Sliders className="w-4 h-4 text-green-400" />
             COMPRESSION QUALITY
           </div>
-          
           <div className="space-y-3 p-4 bg-slate-800/50 rounded-lg border border-slate-700/50">
-             <div className="flex justify-between items-center">
-                 <span className="text-xs text-slate-400">Low</span>
-                 <span className="text-xs text-slate-400">High</span>
-             </div>
+            <div className="flex justify-between items-center text-xs text-slate-500">
+              <span>Smallest</span>
+              <span>Highest Quality</span>
+            </div>
             <div className="flex items-center gap-3">
                 <input
                   type="range"
@@ -166,11 +154,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   {Math.round(options.quality * 100)}%
                 </span>
             </div>
-            {options.format === 'image/png' && (
-                <p className="text-[10px] text-yellow-500/80">
-                    * PNG is lossless. Quality setting may not apply.
-                </p>
-            )}
           </div>
         </section>
       </div>
@@ -184,19 +167,11 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
               ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
               : !hasFiles
               ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-              : showReprocess
-              ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-500/20 active:scale-[0.98]'
-              : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-blue-500/20 active:scale-[0.98]'
-          }`}
+              : (showReprocess ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500' : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500')
+          } text-white shadow-lg active:scale-[0.98]`}
         >
-          {isProcessing ? (
-             <Activity className="w-5 h-5 animate-spin" />
-          ) : showReprocess ? (
-             <RotateCcw className="w-5 h-5" />
-          ) : (
-             <Activity className="w-5 h-5" />
-          )}
-          {isProcessing ? 'Processing...' : showReprocess ? 'Re-process Images' : 'Process Images'}
+          {isProcessing ? <Activity className="w-5 h-5 animate-spin" /> : showReprocess ? <RotateCcw className="w-5 h-5" /> : <Activity className="w-5 h-5" />}
+          {isProcessing ? 'Processing...' : showReprocess ? 'Re-process' : 'Process Images'}
         </button>
       </div>
     </div>

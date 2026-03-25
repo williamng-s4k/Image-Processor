@@ -1,7 +1,7 @@
 import { ProcessingOptions } from './types';
 
 export const DEFAULT_OPTIONS: ProcessingOptions = {
-  format: 'image/jpeg',
+  format: 'original',
   quality: 0.8,
   resizeMode: 'original',
   resizeValue: 100,
@@ -9,9 +9,10 @@ export const DEFAULT_OPTIONS: ProcessingOptions = {
 };
 
 export const SUPPORTED_FORMATS = {
+  'original': 'Keep Original',
   'image/jpeg': 'JPEG',
   'image/png': 'PNG',
   'image/webp': 'WebP',
 };
 
-export const MAX_FILE_SIZE_MB = 50;
+export const MAX_FILE_SIZE_MB = 100;

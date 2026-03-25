@@ -25,8 +25,6 @@ const Dropzone: React.FC<DropzoneProps> = ({ onFilesDropped, className = '', isC
   const isValidFile = (file: File) => {
     const type = file.type.toLowerCase();
     const name = file.name.toLowerCase();
-    
-    // Image mode
     return type.startsWith('image/') || 
            name.endsWith('.heic') || 
            name.endsWith('.heif');
@@ -52,7 +50,6 @@ const Dropzone: React.FC<DropzoneProps> = ({ onFilesDropped, className = '', isC
         const files = Array.from(e.target.files).filter(isValidFile);
         onFilesDropped(files);
       }
-      // Reset value so same files can be selected again
       e.target.value = '';
     },
     [onFilesDropped]
@@ -91,7 +88,7 @@ const Dropzone: React.FC<DropzoneProps> = ({ onFilesDropped, className = '', isC
     <div
       className={`relative flex flex-col items-center justify-center w-full h-full min-h-[300px] border-2 border-dashed rounded-xl transition-all cursor-pointer ${
         isDragging
-          ? 'border-blue-500 bg-blue-500/10 scale-[0.99]'
+          ? 'border-blue-500 bg-blue-500/10'
           : 'border-slate-700 hover:border-slate-500 hover:bg-slate-800/30'
       } ${className}`}
       onDragOver={handleDragOver}
@@ -107,18 +104,14 @@ const Dropzone: React.FC<DropzoneProps> = ({ onFilesDropped, className = '', isC
       />
       <div className="flex flex-col items-center text-center space-y-4 p-8 pointer-events-none">
         <div className={`p-4 rounded-full bg-slate-800/50 ${isDragging ? 'text-blue-400' : 'text-slate-400'}`}>
-            {isDragging ? <Upload className="w-12 h-12" /> : (
-              <div className="relative">
-                 <FileImage className="w-12 h-12" />
-              </div>
-            )}
+            {isDragging ? <Upload className="w-12 h-12" /> : <FileImage className="w-12 h-12" />}
         </div>
         <div className="space-y-1">
           <p className="text-xl font-semibold text-slate-200">
-            {isDragging ? 'Drop files here' : 'Drag & drop files'}
+            {isDragging ? 'Drop images here' : 'Drag & drop images'}
           </p>
           <p className="text-sm text-slate-400">
-            Images (JPG, PNG, WebP, HEIC)
+            Supports JPG, PNG, WebP, and HEIC
           </p>
         </div>
         <div className="pt-4 flex flex-wrap justify-center gap-2">

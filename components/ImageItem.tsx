@@ -70,7 +70,7 @@ const ImageItem: React.FC<ImageItemProps> = ({ item, onRemove }) => {
 
   const baseName = item.file.name.substring(0, item.file.name.lastIndexOf('.')) || item.file.name;
   const downloadName = item.processedFormat 
-    ? `${baseName}_optimized.${getExtension(item.processedFormat)}`
+    ? `${baseName}.${getExtension(item.processedFormat)}`
     : item.file.name;
 
   return (
